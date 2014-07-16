@@ -1,18 +1,3 @@
-/*
-
- TFT Graph
-
- This example for an Arduino screen reads
- the value of an analog sensor on A0, and
- graphs the values on the screen.
-
- This example code is in the public domain.
-
- Created 15 April 2013 by Scott Fitzgerald
-
- http://arduino.cc/en/Tutorial/TFTGraph
-
- */
 
 #include <TFT.h>  // Arduino LCD library
 #include <SPI.h>
@@ -92,7 +77,7 @@ void resetScreen()
   TFTscreen.text("muSv/h\n", TFTscreen.width()-72, 38);
 
   // set the fill color to grey
-  TFTscreen.fill(127, 127, 127);
+  TFTscreen.fill(255,255,224);
   
   // draw a rectangle in the center of screen
   TFTscreen.rect(0, TFTscreen.height()/2, TFTscreen.width(), TFTscreen.height()/2);
@@ -124,11 +109,11 @@ void pulse() {
 
 void drawGraphCPM(int r, int g, int b)
 {
-  int drawHeight = map(temperature, 0, 2048, 0, TFTscreen.height()/2);  
+  int drawHeight = map(cpm, 0, 1000, 0, TFTscreen.height()/2);  
   // draw a line in a nice color
   TFTscreen.stroke(r,g,b);
   //  TFTscreen.line(xPos, TFTscreen.height()-drawHeight, xPos, TFTscreen.height());
-  TFTscreen.line(xPos, TFTscreen.height()-drawHeight, xPos, TFTscreen.height();
+  TFTscreen.line(xPos, TFTscreen.height()-drawHeight, xPos, TFTscreen.height());
   
   // if the graph has reached the screen edge
   // erase the screen and start again
@@ -193,53 +178,15 @@ void update() {
     if (cpm<300)
     {
         printCPM(255,255,255);
-        drawGraphCPM(250, 180, 10);
+        drawGraphCPM(139,69,19);
         printRadiation(150,150,255);
     }
     else
     {
-        printCPM(255,0,0);
-        printRadiation(255,0,0);
+        //Warning
+        printCPM(178,34,34);
+        printRadiation(178,34,34);
     }
-
-//    // show data in LCD
-//    if (warmup) {
-//
-//        lcd.setCursor(0, 1);
-//        lcd.print(cpm, DEC);
-//
-//    } else {
-//
-//        lcd.clear();
-//        lcd.print(F("CPM: "));
-//        lcd.print(cpm, DEC);
-//        lcd.setCursor(0, 1);
-//        lcd.print(F("uSv/h: "));
-//        lcd.print(usvh, 3);
-//
-//    }
-
-  
-    
-//    // send data through radio everytime the ring loops back
-//    if (pointer == 0) {
-//
-//        digitalWrite(DEBUG_PIN, HIGH);
-//
-//        xbee.print(F("cpm:"));
-//        xbee.println(cpm, DEC);
-//        delay(20);
-//        xbee.print(F("usvh:"));
-//        xbee.println(usvh, 3);
-//        delay(20);
-//
-//        digitalWrite(DEBUG_PIN, LOW);
-//
-//        // finish the warmup after the first full period
-//        warmup = false;
-//
-//    }
-
 }
 
 void emulateGeigerCount()
