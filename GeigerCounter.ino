@@ -165,7 +165,7 @@ void update() {
     ring[pointer] = pulses;
   
     Serial.print("CPM: "); Serial.println(cpm,DEC);
-    Serial.print("PULSES: "); Serial.println(pulses,DEC);
+    Serial.print("PULSES IN "); Serial.print(PERIOD_LENGTH/UPDATES_PER_PERIOD/1000,DEC);  Serial.print("s: "); Serial.println(pulses,DEC);
     // reset the interrupt counter
     pulses = 0;
 
