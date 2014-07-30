@@ -16,7 +16,7 @@
 //#define GEIGER_EMULATOR 9
 //#define GEIGER_EMULATOR_CPM 10000
 //#define EMULATE_GEIGER
-#define DEBUG
+//#define DEBUG
 
 // count data for a whole minute (60000 milliseconds)
 // split into 10 chunks of 6 seconds each
@@ -71,7 +71,7 @@ TFT TFTscreen = TFT(cs, dc, rst);
 // position of the line on screen
 int xPos = 0;
 
-int previousRange = 1200;
+int previousRange = 100;
 
 // char array to print to the screen
 char sensorPrintout[10];
@@ -125,7 +125,11 @@ void pulse() {
 
 void drawGraphCPM(int r, int g, int b)
 {
-  int range=1200;
+  int range=100;
+  if (cpm>100)
+    range=300;
+  if (cpm>300)
+    range=1200;
   if (cpm>1200)
     range=12000;
   if(cpm>12000)
@@ -274,8 +278,8 @@ void setup() {
   pinMode(GEIGER_EMULATOR, OUTPUT);
   digitalWrite(GEIGER_EMULATOR, LOW); 
 #endif  
-   // allow pulse to trigger interrupt on rising
-  attachInterrupt(GEIGER_INTERRUPT, pulse, RISING);
+   // allow pulse to trigger interrupt on falling
+  attachInterrupt(GEIGER_INTERRUPT, pulse, FALLING);
 }
 
 void loop() {
