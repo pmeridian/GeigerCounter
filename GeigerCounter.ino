@@ -10,7 +10,7 @@
 #include <SPI.h>
 //#include <SD.h>
 #include <TFT.h>  // Arduino LCD library
-
+#include <math.h>
 
 #define GEIGER_INTERRUPT 0
 //#define GEIGER_EMULATOR 9
@@ -55,6 +55,9 @@ unsigned long next_emulated_count = 0;
 // during the first minute after a reset, the display shows a "warming up" message
 boolean warmup = true;
 
+boolean bckLitIsPressed = false;
+short bckLitVal=2;
+
 // pin definition for the Uno
 //#define cs   10
 //#define dc   9
@@ -65,20 +68,39 @@ boolean warmup = true;
 #define dc   0
 #define rst  1
 #define sd_cs  8
+#define LIT_PWM 5
+#define bckLitButton 6
 
 TFT TFTscreen = TFT(cs, dc, rst);
 
 // position of the line on screen
 int xPos = 0;
 
-int previousRange = 100;
-
 // char array to print to the screen
 char sensorPrintout[10];
 
+void drawReferenceFrame()
+{
+
+  // set the font size
+  TFTscreen.setTextSize(1);
+  TFTscreen.stroke(0,0,0);
+  TFTscreen.text("CPM", 1, (TFTscreen.height()*40/100)+2);
+  TFTscreen.text("0", 25, TFTscreen.height() - valHeight(0) - 9);
+  TFTscreen.text("300", 13, TFTscreen.height() - valHeight(300) - 9);
+  TFTscreen.text("1000", 7,  TFTscreen.height() - valHeight(1000) - 9);
+  TFTscreen.text("10000", 1,  TFTscreen.height() - valHeight(10000) - 9);
+  
+  TFTscreen.noFill();
+  TFTscreen.rect(31, TFTscreen.height()*40/100+1, TFTscreen.width()-31, TFTscreen.height()*60/100-1);
+  TFTscreen.line(31, TFTscreen.height()-valHeight(300)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(300)-1);
+  TFTscreen.line(31, TFTscreen.height()-valHeight(1000)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(1000)-1);
+  TFTscreen.line(31, TFTscreen.height()-valHeight(10000)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(10000)-1);
+}
+
 void resetScreen()
 {
-  xPos=0;
+  xPos=31+1;
      // clear the screen with a pretty color
   TFTscreen.background(250, 16, 200);
    // write the static text to the screen
@@ -87,21 +109,36 @@ void resetScreen()
   // set the font size
   TFTscreen.setTextSize(2);
   // write the text to the top left corner of the screen
-  TFTscreen.text("CPM\n",  TFTscreen.width()-35, 16);
+  TFTscreen.text("CPM\n",  TFTscreen.width()-35, 21);
   // set the font color to white
   TFTscreen.stroke(150, 150, 255);
-  TFTscreen.text("muSv/h\n", TFTscreen.width()-72, 38);
-
+  TFTscreen.text("muSv/h\n", TFTscreen.width()-72, 39);
   // set the fill color to grey
-  TFTscreen.fill(255,255,224);
-  
+  TFTscreen.fill(255,255,224);  
   // draw a rectangle in the center of screen
-  TFTscreen.rect(0, TFTscreen.height()/2, TFTscreen.width(), TFTscreen.height()/2);
-  
-   // set the font size
-  TFTscreen.setTextSize(3);
+  TFTscreen.rect(0, TFTscreen.height()*40/100, TFTscreen.width()+1,TFTscreen.height()*60/100+1);    
+  drawReferenceFrame();
 }
 
+
+int valHeight(int val)
+{
+  int drawHeight;
+  if (val<300)
+    drawHeight=map(val,0,300,0,(TFTscreen.height()*60/100-4)/4);
+  else if (val<1000)
+    drawHeight=(TFTscreen.height()*60/100-4)/4+map(val,300,1000,0,(TFTscreen.height()*60/100-4)/4);
+  else if (val<10000)
+    drawHeight=(TFTscreen.height()*60/100-4)/2+map(val,1000,10000,0,(TFTscreen.height()*60/100-4)/4);
+  else  
+    drawHeight=(TFTscreen.height()*60/100-4)*3/4+map(val,10000,99999,0,(TFTscreen.height()*60/100-4)/4);
+ 
+  if (drawHeight> TFTscreen.height()*60/100-4) {
+    drawHeight=TFTscreen.height()*60/100-4;
+  }
+  
+  return drawHeight;
+}
 void welcomeScreen()
 {  
   // clear the screen with a pretty color
@@ -112,10 +149,11 @@ void welcomeScreen()
   // set the font size
   TFTscreen.setTextSize(2);
   // write the text to the top left corner of the screen
-  TFTscreen.text("+Geiger V0.1+\n", 0, 0);
-  TFTscreen.text("++  by PM  ++\n", 0, 30);
-  TFTscreen.text("++   2014  ++\n", 0, 60);
-
+  TFTscreen.text("++Geiger++\n", 0, 0);
+  delay(500);
+  TFTscreen.text("++by PM ++\n", 0, TFTscreen.height()/2-17);
+  delay(500);
+  TFTscreen.text(" ++V0.1++\n", 0, TFTscreen.height()-17);
   delay(2000);
 }
 
@@ -125,39 +163,14 @@ void pulse() {
 
 void drawGraphCPM(int r, int g, int b)
 {
-  int range=100;
-  if (cpm>100)
-    range=300;
-  if (cpm>300)
-    range=1200;
-  if (cpm>1200)
-    range=12000;
-  if(cpm>12000)
-    range=99999;
-    
-  if (previousRange != range)
-  {
-    resetScreen();
-    previousRange = range;
-    return;
-  }
-    
-  int drawHeight = map(cpm, 0, range, 0, TFTscreen.height()/2);
-  if (drawHeight> TFTscreen.height()/2) {
-    drawHeight=TFTscreen.height()/2;
-  } 
-#ifdef DEBUG
-    Serial.print("[DEBUG]: DRAW HEIGHT "); Serial.println(drawHeight,DEC); 
-#endif  
-  
   // draw a line in a nice color
   TFTscreen.stroke(r,g,b);
   //  TFTscreen.line(xPos, TFTscreen.height()-drawHeight, xPos, TFTscreen.height());
-  TFTscreen.line(xPos, TFTscreen.height()-drawHeight, xPos, TFTscreen.height());
+  TFTscreen.line(xPos, TFTscreen.height()-valHeight(cpm)-1, xPos, TFTscreen.height()-1);
   
   // if the graph has reached the screen edge
   // erase the screen and start again
-  if (xPos >= TFTscreen.width()) {
+  if (xPos >= TFTscreen.width()-2) {
     resetScreen();
   }
   else {
@@ -174,7 +187,7 @@ void printCPM(int r, int g, int b )
   // set the font color to white
   TFTscreen.stroke(r,g,b);
   // set the font size
-  TFTscreen.setTextSize(4);
+  TFTscreen.setTextSize(3);
   // write the text to the top left corner of the screen
   int  printVal = cpm; 
   if (printVal>99999)
@@ -183,7 +196,7 @@ void printCPM(int r, int g, int b )
  
   sensorVal.toCharArray(sensorPrintout, 6);
   
-  TFTscreen.text(sensorPrintout,0,5);
+  TFTscreen.text(sensorPrintout,0,13);
 }
 
 void printRadiation(int r, int g, int b )
@@ -197,7 +210,7 @@ void printRadiation(int r, int g, int b )
   String sensorVal = String(usvh);
   sensorVal.toCharArray(sensorPrintout, 5);
   
-  TFTscreen.text(sensorPrintout,0,38);
+  TFTscreen.text(sensorPrintout,0,39);
 }
 
 void update() {
@@ -233,7 +246,8 @@ void update() {
 //    {
         drawGraphCPM(139,69,19);
         printCPM(255,255,255);
-        printRadiation(150,150,255);
+        printRadiation(150,150,150);
+        drawReferenceFrame();
 //    }
 //    else
 //    {
@@ -261,6 +275,7 @@ void setup() {
  
   // initialize the display
   TFTscreen.begin();
+  TFTscreen.setRotation(0);
 
   xPos=0;
   
@@ -280,9 +295,42 @@ void setup() {
 #endif  
    // allow pulse to trigger interrupt on falling
   attachInterrupt(GEIGER_INTERRUPT, pulse, FALLING);
+  pinMode(LIT_PWM, OUTPUT);
+  // initialize the pushbutton pin as an input:
+  pinMode(bckLitButton, INPUT_PULLUP);
+}
+
+void backLightSet()
+{
+  int buttonState = digitalRead(bckLitButton);
+  // check if the pushbutton is pressed.
+  // if it is, the buttonState is HIGH:
+  if (buttonState == LOW  && ! bckLitIsPressed) {
+    Serial.println("Button is pressed");
+    bckLitIsPressed = true;
+    bckLitVal++;
+    bckLitVal=bckLitVal%3;
+  }
+  else if (buttonState == HIGH)
+    bckLitIsPressed = false;
+    
+  // 3-state driven backlight settings  
+  switch (bckLitVal) {
+    case 1:
+      analogWrite(LIT_PWM,122);
+      break;
+    case 2:
+      analogWrite(LIT_PWM,255);
+      break;
+    default: 
+      analogWrite(LIT_PWM,0);
+  }
 }
 
 void loop() {
+  
+    backLightSet();
+    
 #ifdef EMULATE_GEIGER  
     if (millis()>next_emulated_count)
     {
