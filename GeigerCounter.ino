@@ -8,7 +8,7 @@
 
 // include the necessary libraries
 #include <SPI.h>
-//#include <SD.h>
+
 #include <TFT.h>  // Arduino LCD library
 #include <math.h>
 
@@ -17,7 +17,10 @@
 //#define GEIGER_EMULATOR_CPM 10000
 //#define EMULATE_GEIGER
 //#define DEBUG
-
+#define ENABLE_SD_LOG
+#ifdef ENABLE_SD_LOG
+#include <SD.h>
+#endif
 // count data for a whole minute (60000 milliseconds)
 // split into 10 chunks of 6 seconds each
 #define PERIOD_LENGTH 60000
@@ -34,14 +37,12 @@
 // pulses in the current subperiod
 volatile unsigned long pulses = 0;
 
+// counter of measures done since last reset
 unsigned long nmeasures = 0;
 
-// stores the pulses for a set of 6 seconds periods
+// moving average ring 
 #define RING_SIZE 15
-
 unsigned long ring[RING_SIZE] = {0};
-
-// pointer to the next cell in the ring to update
 byte pointer = 0;
 
 // keeps the sum of counts for the ring
@@ -53,7 +54,7 @@ unsigned long next_update = 0;
 unsigned long next_emulated_count = 0;
 
 // during the first minute after a reset, the display shows a "warming up" message
-boolean warmup = true;
+//boolean warmup = true;
 
 boolean bckLitIsPressed = false;
 short bckLitVal=2;
@@ -67,17 +68,38 @@ short bckLitVal=2;
 #define cs   7
 #define dc   0
 #define rst  1
-#define sd_cs  8
+#define sd_cs  4
 #define LIT_PWM 5
 #define bckLitButton 6
 
+//TFTscreen + SDcard
 TFT TFTscreen = TFT(cs, dc, rst);
+
+
+//Parameters for display
+#define X_START_POS 31
+#define Y_GRAPH_START 40
+#define Y_GRAPH_HEIGHT 60
+#define N_Y_DIV 3
+#define Y_AXIS_VAL_0 0
+#define Y_AXIS_VAL_1 500
+#define Y_AXIS_VAL_2 4000
+//#define Y_AXIS_VAL_3 10000
+#define Y_AXIS_VAL_MAX 99999
 
 // position of the line on screen
 int xPos = 0;
-
 // char array to print to the screen
 char sensorPrintout[10];
+
+
+
+void printInt(int val, int length, int x, int y)
+{
+  String sensorVal = String(val);
+  sensorVal.toCharArray(sensorPrintout, length);
+  TFTscreen.text(sensorPrintout, x, y);
+}
 
 void drawReferenceFrame()
 {
@@ -85,22 +107,23 @@ void drawReferenceFrame()
   // set the font size
   TFTscreen.setTextSize(1);
   TFTscreen.stroke(0,0,0);
-  TFTscreen.text("CPM", 1, (TFTscreen.height()*40/100)+2);
-  TFTscreen.text("0", 25, TFTscreen.height() - valHeight(0) - 9);
-  TFTscreen.text("300", 13, TFTscreen.height() - valHeight(300) - 9);
-  TFTscreen.text("1000", 7,  TFTscreen.height() - valHeight(1000) - 9);
-  TFTscreen.text("10000", 1,  TFTscreen.height() - valHeight(10000) - 9);
+  TFTscreen.text("CPM", 1, (TFTscreen.height()*Y_GRAPH_START/100)+2);
+
+  printInt(Y_AXIS_VAL_0, 6, 25, TFTscreen.height() - valHeight(Y_AXIS_VAL_0) - 8);
+  printInt(Y_AXIS_VAL_1, 6, 13, TFTscreen.height() - valHeight(Y_AXIS_VAL_1) - 8);
+  printInt(Y_AXIS_VAL_2, 6, 7,  TFTscreen.height() - valHeight(Y_AXIS_VAL_2) - 8);
+//  printInt(Y_AXIS_VAL_3, 6, 1,  TFTscreen.height() - valHeight(Y_AXIS_VAL_3) - 8);
   
   TFTscreen.noFill();
-  TFTscreen.rect(31, TFTscreen.height()*40/100+1, TFTscreen.width()-31, TFTscreen.height()*60/100-1);
-  TFTscreen.line(31, TFTscreen.height()-valHeight(300)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(300)-1);
-  TFTscreen.line(31, TFTscreen.height()-valHeight(1000)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(1000)-1);
-  TFTscreen.line(31, TFTscreen.height()-valHeight(10000)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(10000)-1);
+  TFTscreen.rect(X_START_POS, TFTscreen.height()*Y_GRAPH_START/100+1, TFTscreen.width()-X_START_POS, TFTscreen.height()*Y_GRAPH_HEIGHT/100-1);
+  TFTscreen.line(X_START_POS, TFTscreen.height()-valHeight(Y_AXIS_VAL_1)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(Y_AXIS_VAL_1)-1);
+  TFTscreen.line(X_START_POS, TFTscreen.height()-valHeight(Y_AXIS_VAL_2)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(Y_AXIS_VAL_2)-1);
+//  TFTscreen.line(X_START_POS, TFTscreen.height()-valHeight(Y_AXIS_VAL_3)-1, TFTscreen.width()-1, TFTscreen.height()-valHeight(Y_AXIS_VAL_3)-1);
 }
 
 void resetScreen()
 {
-  xPos=31+1;
+  xPos=X_START_POS+1;
      // clear the screen with a pretty color
   TFTscreen.background(250, 16, 200);
    // write the static text to the screen
@@ -116,7 +139,7 @@ void resetScreen()
   // set the fill color to grey
   TFTscreen.fill(255,255,224);  
   // draw a rectangle in the center of screen
-  TFTscreen.rect(0, TFTscreen.height()*40/100, TFTscreen.width()+1,TFTscreen.height()*60/100+1);    
+  TFTscreen.rect(0, TFTscreen.height()*Y_GRAPH_START/100, TFTscreen.width()+1,TFTscreen.height()*Y_GRAPH_HEIGHT/100+1);    
   drawReferenceFrame();
 }
 
@@ -124,17 +147,17 @@ void resetScreen()
 int valHeight(int val)
 {
   int drawHeight;
-  if (val<300)
-    drawHeight=map(val,0,300,0,(TFTscreen.height()*60/100-4)/4);
-  else if (val<1000)
-    drawHeight=(TFTscreen.height()*60/100-4)/4+map(val,300,1000,0,(TFTscreen.height()*60/100-4)/4);
-  else if (val<10000)
-    drawHeight=(TFTscreen.height()*60/100-4)/2+map(val,1000,10000,0,(TFTscreen.height()*60/100-4)/4);
+  if (val<Y_AXIS_VAL_1)
+    drawHeight=map(val,0,Y_AXIS_VAL_1,0,(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)/N_Y_DIV);
+  else if (val<Y_AXIS_VAL_2)
+    drawHeight=(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)/N_Y_DIV+map(val,Y_AXIS_VAL_1,Y_AXIS_VAL_2,0,(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)/N_Y_DIV);
+//  else if (val<Y_AXIS_VAL_3)
+//    drawHeight=(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)/N_Y_DIV+map(val,Y_AXIS_VAL_2,Y_AXIS_VAL_3,0,(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)/N_Y_DIV);
   else  
-    drawHeight=(TFTscreen.height()*60/100-4)*3/4+map(val,10000,99999,0,(TFTscreen.height()*60/100-4)/4);
+    drawHeight=(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)*2/N_Y_DIV+map(val,Y_AXIS_VAL_2,Y_AXIS_VAL_MAX,0,(TFTscreen.height()*Y_GRAPH_HEIGHT/100-4)/N_Y_DIV);
  
-  if (drawHeight> TFTscreen.height()*60/100-4) {
-    drawHeight=TFTscreen.height()*60/100-4;
+  if (drawHeight> TFTscreen.height()*Y_GRAPH_HEIGHT/100-4) {
+    drawHeight=TFTscreen.height()*Y_GRAPH_HEIGHT/100-4;
   }
   
   return drawHeight;
@@ -147,14 +170,26 @@ void welcomeScreen()
   // set the font color to white
   TFTscreen.stroke(255, 255, 255);
   // set the font size
-  TFTscreen.setTextSize(2);
+  TFTscreen.setTextSize(1);
   // write the text to the top left corner of the screen
-  TFTscreen.text("++Geiger++\n", 0, 0);
-  delay(500);
-  TFTscreen.text("++by PM ++\n", 0, TFTscreen.height()/2-17);
-  delay(500);
-  TFTscreen.text(" ++V0.1++\n", 0, TFTscreen.height()-17);
+//  TFTscreen.text("++Geiger++\n", 0, 0);
+//  TFTscreen.text("++V0.1++\n", 0, 10);
   delay(2000);
+}
+
+void initFailed()
+{
+  TFTscreen.text("Init fale\n", 0, 0);
+}
+
+void initOK()
+{
+  TFTscreen.text("FW V0.2\n", 0, 0);
+  TFTscreen.text("OK\n", 0, 10);
+#ifdef ENABLE_SD_LOG
+  TFTscreen.text("WRITE TO GEIGER.CSV\n", 0, 20);
+#endif
+   delay(3000);
 }
 
 void pulse() {
@@ -170,7 +205,7 @@ void drawGraphCPM(int r, int g, int b)
   
   // if the graph has reached the screen edge
   // erase the screen and start again
-  if (xPos >= TFTscreen.width()-2) {
+  if (xPos >= TFTscreen.width()-1) {
     resetScreen();
   }
   else {
@@ -190,12 +225,12 @@ void printCPM(int r, int g, int b )
   TFTscreen.setTextSize(3);
   // write the text to the top left corner of the screen
   int  printVal = cpm; 
-  if (printVal>99999)
-    printVal=99999;
+  if (printVal>Y_AXIS_VAL_MAX)
+    printVal=Y_AXIS_VAL_MAX;
+    
   String sensorVal = String(printVal);
- 
   sensorVal.toCharArray(sensorPrintout, 6);
-  
+
   TFTscreen.text(sensorPrintout,0,13);
 }
 
@@ -211,6 +246,31 @@ void printRadiation(int r, int g, int b )
   sensorVal.toCharArray(sensorPrintout, 5);
   
   TFTscreen.text(sensorPrintout,0,39);
+}
+void logData()
+{
+  // make a string for assembling the data to log:
+  String dataString = "";
+  dataString += String(nmeasures);
+  dataString += ",";
+  dataString += String(cpm);
+  dataString += ",";
+  dataString += String(pulses);
+
+  Serial.println(dataString);
+  
+  // open the file. note that only one file can be open at a time,
+  // so you have to close this one before opening another.
+  File dataFile = SD.open("GEIGER.CSV", FILE_WRITE);
+  // if the file is available, write to it:
+  if (dataFile) {
+    dataFile.println(dataString);
+    dataFile.close();
+  }
+  // if the file isn't open, pop up an error:
+  else {
+    Serial.println("FILE_ERR");
+  }
 }
 
 void update() {
@@ -231,82 +291,43 @@ void update() {
   
     nmeasures++;
     
-    Serial.print("CPM: "); Serial.println(cpm,DEC);
-    Serial.print("MEASURE # "); Serial.print(nmeasures,DEC); Serial.print("; PULSES IN "); Serial.print(PERIOD_LENGTH/UPDATES_PER_PERIOD/1000,DEC);  Serial.print("s: "); Serial.println(pulses,DEC);
+    logData();
+    
     // reset the interrupt counter
     pulses = 0;
-
     // move the pointer to the next position in the ring
     pointer = (pointer + 1) % RING_SIZE;
-
     // calculate the uSv/h
     usvh = cpm * CPM_TO_USVH;
 
-//    if (cpm<300)
-//    {
-        drawGraphCPM(139,69,19);
-        printCPM(255,255,255);
-        printRadiation(150,150,150);
-        drawReferenceFrame();
-//    }
-//    else
-//    {
-        //Print in different color. Radiation warning
-//        drawGraphCPM(139,69,19);
-//        printCPM(178,34,34);
-//        printRadiation(178,34,34);
-//    }
+    drawGraphCPM(139,69,19);
+    printCPM(255,255,255);
+    printRadiation(150,150,150);
+    
+    drawReferenceFrame();
 }
+
+
 
 #ifdef EMULATE_GEIGER
 void emulateGeigerCount()
 {
-   digitalWrite(GEIGER_EMULATOR, HIGH);
-   delayMicroseconds(700);
    digitalWrite(GEIGER_EMULATOR, LOW);
+   delayMicroseconds(700);
+   digitalWrite(GEIGER_EMULATOR, HIGH);
 }
 #endif
-
-void setup() {
- 
-  // initialize the serial port
-  Serial.begin(9600);
-  
- 
-  // initialize the display
-  TFTscreen.begin();
-  TFTscreen.setRotation(0);
-
-  xPos=0;
-  
-  // try to access the SD card. If that fails (e.g.
-  // no card present), the setup process will stop.
-//  Serial.print(F("Initializing SD card..."));
-//  if (!SD.begin(sd_cs)) {
-//    Serial.println(F("SD init failed!"));
-//  }
-  
-  welcomeScreen();
-  resetScreen();
-
-#ifdef EMULATE_GEIGER 
-  pinMode(GEIGER_EMULATOR, OUTPUT);
-  digitalWrite(GEIGER_EMULATOR, LOW); 
-#endif  
-   // allow pulse to trigger interrupt on falling
-  attachInterrupt(GEIGER_INTERRUPT, pulse, FALLING);
-  pinMode(LIT_PWM, OUTPUT);
-  // initialize the pushbutton pin as an input:
-  pinMode(bckLitButton, INPUT_PULLUP);
-}
 
 void backLightSet()
 {
   int buttonState = digitalRead(bckLitButton);
   // check if the pushbutton is pressed.
   // if it is, the buttonState is HIGH:
+  
   if (buttonState == LOW  && ! bckLitIsPressed) {
+#ifdef DEBUG    
     Serial.println("Button is pressed");
+#endif
     bckLitIsPressed = true;
     bckLitVal++;
     bckLitVal=bckLitVal%3;
@@ -314,7 +335,9 @@ void backLightSet()
   else if (buttonState == HIGH)
     bckLitIsPressed = false;
     
-  // 3-state driven backlight settings  
+  analogWrite(LIT_PWM,254-(bckLitVal)*122);
+  /*  
+  // 3-state driven backlight settings, each button press cycle between them  
   switch (bckLitVal) {
     case 1:
       analogWrite(LIT_PWM,122);
@@ -325,11 +348,89 @@ void backLightSet()
     default: 
       analogWrite(LIT_PWM,0);
   }
+  */
+}
+/*
+void createLogFile()
+{
+  // re-open the file for reading:
+  File myFile = SD.open("lastRun.txt");
+  
+//  if (myFile) {
+//#ifdef DEBUG    
+//    while (myFile.available()) {
+//      Serial.write(myFile.read());
+//    }
+//#endif
+//   myFile.close();
+//  }
+}
+*/
+////////////////////////////////////////////////////////
+///
+///    Now the real execution code
+///
+////////////////////////////////////////////////////////
+
+bool setupStatus=false;
+
+void setup() {
+   
+  // initialize the serial port
+  Serial.begin(9600);
+#ifdef DEBUG 
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for Leonardo only
+  }
+  Serial.println("\nOK let's go");
+#endif
+
+ 
+  // initialize the display
+  TFTscreen.begin();
+  TFTscreen.setRotation(0);
+
+  xPos=0;
+  
+  
+  welcomeScreen();
+  
+  // try to access the SD card. If that fails (e.g.
+  // no card present), the setup process will stop.
+  //Serial.print(F("Initializing SD card..."));
+  pinMode(10, OUTPUT);
+#ifdef ENABLE_SD_LOG
+  if (!SD.begin(sd_cs)) {
+      //Serial.println(F("SD init failed!"));
+      initFailed();
+      return;
+  }
+#endif
+  //Serial.println(F("OK!"));
+
+  initOK();
+  resetScreen();
+
+#ifdef EMULATE_GEIGER 
+  pinMode(GEIGER_EMULATOR, OUTPUT);
+  digitalWrite(GEIGER_EMULATOR, HIGH); 
+#endif  
+
+  // allow pulse to trigger interrupt on falling
+  attachInterrupt(GEIGER_INTERRUPT, pulse, FALLING);
+  pinMode(LIT_PWM, OUTPUT);
+  // initialize the pushbutton pin as an input:
+  pinMode(bckLitButton, INPUT_PULLUP);
+
+  setupStatus = true;
 }
 
+
 void loop() {
-  
-    backLightSet();
+  if (!setupStatus)
+    return;
+    
+  backLightSet();
     
 #ifdef EMULATE_GEIGER  
     if (millis()>next_emulated_count)
@@ -338,7 +439,7 @@ void loop() {
       emulateGeigerCount();
     }
 #endif
-    // check if I have to update the info
+
     if (millis() > next_update) {
         next_update = millis() + PERIOD_LENGTH / UPDATES_PER_PERIOD;
         update();
